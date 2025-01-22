@@ -1,0 +1,14 @@
+# requirements.txt
+requests==2.31.0
+pandas==2.1.4
+confluent-kafka==2.3.0
+pyspark==3.5.0
+torch==2.2.2
+transformers==4.36.2
+streamlit==1.29.0
+plotly==5.18.0
+watchdog==3.0.0
+tqdm==4.66.1
+langdetect==1.0.9
+beautifulsoup4==4.12.3
+python-dotenv==1.0.0  # (Optional) Nếu dùng biến môi trường
