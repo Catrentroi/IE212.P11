@@ -11,4 +11,4 @@ watchdog==3.0.0
 tqdm==4.66.1
 langdetect==1.0.9
 beautifulsoup4==4.12.3
-python-dotenv==1.0.0  # (Optional) Nếu dùng biến môi trường
+python-dotenv==1.0.0  

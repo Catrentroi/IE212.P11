@@ -1,45 +1,118 @@
-# realtime_dashboard.py
+# ----------- realtime_dashboard.py -----------
 import streamlit as st
 import pandas as pd
 import time
-import plotly.express as px
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+import json
+from confluent_kafka import Consumer, KafkaError
+from datetime import datetime
+from config import KAFKA_CONFIG
 
-# Cấu hình tự động reload file
-class CSVHandler(FileSystemEventHandler):
-    def on_modified(self, event):
-        if event.src_path.endswith("predictions.csv"):
-            st.experimental_rerun()
+# Khởi tạo session state để lưu dữ liệu tích lũy
+if 'accumulated_data' not in st.session_state:
+    st.session_state.accumulated_data = pd.DataFrame(columns=["timestamp", "product_id", "content", "aspect_sentiment"])
 
-# Khởi tạo observer
-observer = Observer()
-observer.schedule(CSVHandler(), path="data/")
-observer.start()
+st.set_page_config(page_title="Tiki Comment Analysis", layout="wide")
 
-# Streamlit UI
-st.title("📊 Realtime Comment Analysis Dashboard")
+def create_kafka_consumer():
+    conf = {
+        'bootstrap.servers': KAFKA_CONFIG["bootstrap.servers"],
+        'group.id': 'tiki-dashboard-group',
+        'auto.offset.reset': 'latest',
+        'enable.auto.commit': False
+    }
+    consumer = Consumer(conf)
+    consumer.subscribe([KAFKA_CONFIG["output_topic"]])
+    return consumer
 
-@st.cache_data
-def load_data():
+def process_message(message):
     try:
-        return pd.read_csv("data/output/part-*.csv")  # Đọc tất cả file CSV mới nhất
-    except:
-        return pd.DataFrame()
-
-# Hiển thị dữ liệu real-time
-placeholder = st.empty()
-while True:
-    df = load_data()
-    with placeholder.container():
-        # Hiển thị 10 bản ghi mới nhất
-        st.subheader("Latest Predictions")
-        st.dataframe(df.tail(10))
+        data = json.loads(message.value().decode('utf-8'))
+        predictions = data.get('predictions', {})
         
-        # Phân phối nhãn
-        st.subheader("Prediction Distribution")
-        if not df.empty:
-            fig = px.pie(df, names='prediction', title='Distribution of Predictions')
-            st.plotly_chart(fig)
+        if isinstance(predictions, str):
+            predictions = json.loads(predictions.replace("'", "\""))
+        
+        # Giữ lại tất cả aspect kể cả sentiment None
+        return {
+            "product_id": data.get("product_id", "N/A"),
+            "content": data.get("processed_content", "N/A"),
+            "predictions": predictions,
+            "timestamp": datetime.now().strftime("%H:%M:%S")
+        }
+    except Exception as e:
+        st.error(f"Error processing message: {str(e)}")
+        return None
+
+def get_realtime_data(consumer):
+    data = []
+    start_time = time.time()
     
-    time.sleep(5)  # Cập nhật mỗi 5 giây
+    while time.time() - start_time < 1:
+        msg = consumer.poll(0.1)
+        
+        if msg is None:
+            continue
+            
+        if msg.error() and msg.error().code() != KafkaError._PARTITION_EOF:
+            continue
+                
+        processed = process_message(msg)
+        if processed and processed['predictions']:
+            data.append(processed)
+    
+    return data
+
+st.title("📊 Tiki Comment Analysis - Live Feed")
+
+# Khởi tạo consumer
+consumer = create_kafka_consumer()
+data_placeholder = st.empty()
+
+try:
+    while True:
+        raw_data = get_realtime_data(consumer)
+        
+        if raw_data:
+            # Tạo DataFrame mới
+            new_data = []
+            for record in raw_data:
+                # Tạo chuỗi aspect:sentiment
+                aspect_pairs = [
+                    f"{aspect}: {sentiment}" 
+                    for aspect, sentiment in record['predictions'].items()
+                ]
+                new_data.append({
+                    "timestamp": record['timestamp'],
+                    "product_id": record['product_id'],
+                    "content": record['content'],
+                    "aspect_sentiment": ", ".join(aspect_pairs)
+                })
+            
+            new_df = pd.DataFrame(new_data)
+            
+            # Cập nhật dữ liệu tích lũy
+            if not new_df.empty:
+                st.session_state.accumulated_data = pd.concat(
+                    [st.session_state.accumulated_data, new_df],
+                    ignore_index=True
+                ).tail(100)  # Giữ lại 100 bản ghi gần nhất
+            
+        # Hiển thị toàn bộ dữ liệu
+        with data_placeholder.container():
+            st.dataframe(
+                st.session_state.accumulated_data,
+                height=600,
+                column_config={
+                    "timestamp": "Timestamp",
+                    "product_id": "Product ID",
+                    "content": {"title": "Comment Text"},
+                    "aspect_sentiment": {"title": "Aspect Sentiment Pairs"}
+                },
+                use_container_width=True
+            )
+        
+        time.sleep(0.5)
+
+finally:
+    consumer.close()
+    st.success("✅ Disconnected from Kafka")
