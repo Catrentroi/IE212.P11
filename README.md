@@ -2,9 +2,9 @@
 
 Xây dựng Hệ thống Phân tích Dựa trên khía cạnh Cảm xúc (ABSA) Trực tuyến sử dụng Spark và Kafka trên Dữ liệu Bình luận từ Tiki.
 
-Trần Quốc Trung - 22521569
-Nguyễn Công Nam Triều - 22521533
-Dư Duy Tài - 22521272
+Trần Quốc Trung - 22521569 /
+Nguyễn Công Nam Triều - 22521533 /
+Dư Duy Tài - 22521272 /
 
 GVDH: Đỗ Trọng Hợp
 
